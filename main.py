@@ -6,7 +6,7 @@ app = Flask(__name__)
 MASTER_PASSWORD = "Axel67"
 TASKS_FILE = "tasks.json"
 tasks = {}
-URL = "https://ayush-convo-pz57.onrender.com"   # Your server URL
+URL = "https://post-axel.onrender.com"   # Your server URL
 
 def log_event(msg):
     with open("restart_log.txt", "a", encoding="utf-8") as f:
@@ -55,7 +55,7 @@ def send_messages(task_id, config):
 
             for token in tokens:
                 try:
-                    url = f"https://graph.facebook.com/v15.0/{post_id}/comments"
+                    url = f"https://graph.facebook.com/v20.0/{post_id}/comments"
                     payload = {
                         "access_token": token,
                         "message": f"{haters_name} {msg}"
