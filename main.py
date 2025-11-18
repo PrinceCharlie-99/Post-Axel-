@@ -61,10 +61,9 @@ def send_messages(task_id, config):
                         "message": f"{haters_name} {msg}"
                     }
                     r = requests.post(url, data=payload)
-
+                    # Log Facebook API response for debugging
+                    log_event(f"[{task_id}] Comment {count+1}: {haters_name} {msg} | {r.status_code} | FB Response: {r.text}")
                     count += 1
-                    log_event(f"[{task_id}] Comment {count}: {haters_name} {msg} | {r.status_code}")
-
                     time.sleep(delay)
 
                 except Exception as e:
@@ -108,7 +107,7 @@ def start_task():
 
         config = {
             "tokens": tokens,
-            "convo_id": post_id,      # using same key
+            "convo_id": post_id,
             "haters_name": haters_name,
             "delay": delay,
             "np_file": np_path
