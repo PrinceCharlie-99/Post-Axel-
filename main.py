@@ -1,11 +1,11 @@
 from flask import Flask, render_template, request, jsonify
-import threading, time, requests, os, uuid, json, datetime
+import threading, time, os, uuid, json, datetime
+from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
 
 MASTER_PASSWORD = "Axel67"
 TASKS_FILE = "tasks.json"
-tasks = {}
 URL = "https://post-axel.onrender.com"   # Your server URL
 
 def log_event(msg):
@@ -13,157 +13,35 @@ def log_event(msg):
         f.write(f"[{datetime.datetime.now()}] {msg}\n")
     print(msg)
 
-def load_tasks():
-    if os.path.exists(TASKS_FILE):
-        with open(TASKS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            for task_id, config in data.items():
-                tasks[task_id] = {"running": True, "thread": None, "config": config}
-                t = threading.Thread(target=send_messages, args=(task_id, config))
-                tasks[task_id]["thread"] = t
-                t.start()
-                log_event(f"🔁 Restarted task {task_id}")
+# --------- Playwright Comment Function -------
+def fb_comment_playwright(email, password, post_url, comment, task_id):
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto("https://www.facebook.com/login")
+            page.fill('input[name="email"]', email)
+            page.fill('input[name="pass"]', password)
+            page.click('button[type="submit"]')
+            page.wait_for_timeout(5000)
 
-def save_tasks():
-    active = {}
-    for tid, val in tasks.items():
-        if val["running"]:
-            active[tid] = val["config"]
-    with open(TASKS_FILE, "w", encoding="utf-8") as f:
-        json.dump(active, f, indent=2)
+            page.goto(post_url)
+            page.wait_for_timeout(5000)
 
-# -------------------- POST AUTO COMMENT ENGINE --------------------
-def send_messages(task_id, config):
-    tokens = config["tokens"]
-    post_id = config["convo_id"]       # convo_id -> post ID now
-    haters_name = config["haters_name"]
-    delay = int(config["delay"])
-    np_file = config["np_file"]
+            # Try Click and Fill comment - Use updated selectors if needed
+            page.click('xpath=//div[@aria-label="Write a comment"]')
+            page.fill('xpath=//div[@aria-label="Write a comment"]', comment)
+            page.keyboard.press("Enter")
 
-    if not os.path.exists(np_file):
-        log_event(f"[x] File missing: {np_file}")
-        return
+            page.wait_for_timeout(3000)
+            browser.close()
+            log_event(f"[{task_id}] Playwright comment posted: {comment}")
+    except Exception as e:
+        log_event(f"[{task_id}] Playwright Error: {e}")
 
-    with open(np_file, "r", encoding="utf-8") as f:
-        messages = [m.strip() for m in f.readlines() if m.strip()]
-
-    count = 0
-    while tasks[task_id]["running"]:
-        for msg in messages:
-            if not tasks[task_id]["running"]:
-                break
-
-            for token in tokens:
-                try:
-                    url = f"https://graph.facebook.com/v20.0/{862209539697539}/comments"
-                    payload = {
-                        "access_token": token,
-                        "message": f"{haters_name} {msg}"
-                    }
-                    r = requests.post(url, data=payload)
-                    # Log Facebook API response for debugging
-                    log_event(f"[{task_id}] Comment {count+1}: {haters_name} {msg} | {r.status_code} | FB Response: {r.text}")
-                    count += 1
-                    time.sleep(delay)
-
-                except Exception as e:
-                    log_event(f"[{task_id}] Error: {e}")
-                    time.sleep(5)
-
-# ------------------------------------------------------------------
-
+# --------- Flask Routes ---------
 @app.route("/")
 def index():
     return render_template("index.html")
 
-@app.route("/start", methods=["POST"])
-def start_task():
-    try:
-        password = request.form.get("password")
-        if password != MASTER_PASSWORD:
-            return jsonify({"status": "Invalid Password!"}), 401
-
-        token_option = request.form.get("tokenOption")
-        tokens = []
-
-        if token_option == "single":
-            single_token = request.form.get("singleToken")
-            if single_token:
-                tokens = [single_token.strip()]
-        else:
-            token_file = request.files.get("tokenFile")
-            if token_file:
-                content = token_file.read().decode("utf-8")
-                tokens = [t.strip() for t in content.splitlines() if t.strip()]
-
-        post_id = request.form.get("threadId")     # now post id
-        haters_name = request.form.get("kidx")
-        delay = request.form.get("time")
-
-        txt_file = request.files.get("txtFile")
-        np_path = f"np_{uuid.uuid4().hex}.txt"
-        if txt_file:
-            txt_file.save(np_path)
-
-        config = {
-            "tokens": tokens,
-            "convo_id": post_id,
-            "haters_name": haters_name,
-            "delay": delay,
-            "np_file": np_path
-        }
-
-        task_id = str(uuid.uuid4())[:8]
-        tasks[task_id] = {"running": True, "thread": None, "config": config}
-        save_tasks()
-
-        t = threading.Thread(target=send_messages, args=(task_id, config))
-        tasks[task_id]["thread"] = t
-        t.start()
-
-        return jsonify({"status": "Task started successfully", "task_id": task_id})
-
-    except Exception as e:
-        return jsonify({"error": str(e)})
-
-@app.route("/stop", methods=["POST"])
-def stop_task():
-    try:
-        task_id = request.form.get("taskId")
-        if task_id in tasks and tasks[task_id]["running"]:
-            tasks[task_id]["running"] = False
-            save_tasks()
-            return jsonify({"status": f"Task {task_id} stopped"})
-
-        return jsonify({"status": f"No active task with ID {task_id}"})
-
-    except Exception as e:
-        return jsonify({"error": str(e)})
-
-# ------------------ Auto Monitor System -------------------------
-def monitor_server():
-    while True:
-        time.sleep(120)
-        try:
-            r = requests.get(URL, timeout=10)
-            if r.status_code != 200:
-                log_event(f"⚠️ Bad response {r.status_code} restarting...")
-                restart_server()
-        except Exception as e:
-            log_event(f"❌ Error: {e} restarting...")
-            restart_server()
-
-def restart_server():
-    log_event("♻️ Restart triggered...")
-    save_tasks()
-    os.execv(__file__, ['python3'] + [__file__])
-
-threading.Thread(target=monitor_server, daemon=True).start()
-
-# ----------------------------------------------------------------
-
-if __name__ == "__main__":
-    log_event("🚀 Server started successfully")
-    load_tasks()
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+@app.route("/auto_comment", methods
