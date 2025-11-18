@@ -55,8 +55,7 @@ def send_messages(task_id, config):
 
             for token in tokens:
                 try:
-                    url = f"https://graph.facebook.com/v20.0/{862209539697539}"
-/comments"
+                    url = f"https://graph.facebook.com/v20.0/{862209539697539}/comments"
                     payload = {
                         "access_token": token,
                         "message": f"{haters_name} {msg}"
